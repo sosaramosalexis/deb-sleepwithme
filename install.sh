@@ -106,6 +106,22 @@ disable_timer() {
   systemctl disable --now "${SERVICE_NAME}.timer" 2>/dev/null || true
 }
 
+format_12h() {
+  local h m ampm
+  h="${1%%:*}"
+  m="${1##*:}"
+  if [[ "$h" -eq 0 ]]; then
+    ampm="AM"; h=12
+  elif [[ "$h" -lt 12 ]]; then
+    ampm="AM"
+  elif [[ "$h" -eq 12 ]]; then
+    ampm="PM"
+  else
+    ampm="PM"; h=$((h-12))
+  fi
+  printf "%d:%02d %s" "$h" "$m" "$ampm"
+}
+
 show_schedule() {
   echo ""
   if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -113,8 +129,18 @@ show_schedule() {
     return
   fi
   info "Current schedule:"
-  echo "  Days: ${SCHEDULE_DAYS:-none}"
-  echo "  Time: ${SCHEDULE_TIME:-none}"
+  local day_names_map
+  day_names_map=([mon]="Monday" [tue]="Tuesday" [wed]="Wednesday" [thu]="Thursday" [fri]="Friday" [sat]="Saturday" [sun]="Sunday")
+  local display_days=""
+  IFS=',' read -ra days <<< "$SCHEDULE_DAYS"
+  for d in "${days[@]}"; do
+    [[ -n "$display_days" ]] && display_days+=", "
+    display_days+="${day_names_map[$d]:-$d}"
+  done
+  echo "  Days: ${display_days:-none}"
+  local t12
+  t12=$(format_12h "${SCHEDULE_TIME}")
+  echo "  Time: ${SCHEDULE_TIME}  (${t12})"
   if systemctl is-active --quiet "${SERVICE_NAME}.timer" 2>/dev/null; then
     echo "  Status: ${GREEN}active${NC}"
     echo "  Next run: $(systemctl show -p NextElapseUSecMonotonic "${SERVICE_NAME}.timer" 2>/dev/null | cut -d= -f2 || echo 'unknown')"
@@ -125,43 +151,101 @@ show_schedule() {
 
 configure_schedule() {
   echo ""
-  info "Select days to shut down (space-separated numbers, e.g. '1 3 5'):"
-  for i in "${!DAYS_OF_WEEK[@]}"; do
-    printf "  %d) %s\n" $((i+1)) "${DAYS_OF_WEEK[$i]}"
-  done
-  read -rp "Days: " day_input
 
   local selected_days=()
-  for num in $day_input; do
-    if [[ "$num" =~ ^[1-7]$ ]]; then
-      selected_days+=("${DAYS_OF_WEEK[$((num-1))]}")
-    fi
+  local day_names=("Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday" "Sunday")
+  local toggle=("" "" "" "" "" "" "")
+
+  info "Select shutdown days (type a number to toggle it, then 'd' when done):"
+  echo ""
+  while true; do
+    for i in "${!DAYS_OF_WEEK[@]}"; do
+      local mark=" "
+      [[ -n "${toggle[$i]}" ]] && mark="X"
+      printf "  [%s] %d) %-9s (%s)\n" "$mark" $((i+1)) "${DAYS_OF_WEEK[$i]}" "${day_names[$i]}"
+    done
+    echo ""
+    read -rp "  Toggle day number (or 'd' when done): " inp
+    case "$inp" in
+      [Dd]) break ;;
+      [1-7])
+        local idx=$((inp-1))
+        if [[ -n "${toggle[$idx]}" ]]; then
+          toggle[$idx]=""
+        else
+          toggle[$idx]="X"
+        fi
+        echo ""
+        ;;
+      *) err "Enter 1-7 to toggle, or 'd' to finish."; echo "" ;;
+    esac
+  done
+
+  for i in "${!toggle[@]}"; do
+    [[ -n "${toggle[$i]}" ]] && selected_days+=("${DAYS_OF_WEEK[$i]}")
   done
 
   if [[ ${#selected_days[@]} -eq 0 ]]; then
-    err "No valid days selected."
+    err "No days selected."
     return 1
   fi
 
   SCHEDULE_DAYS=""
   for day in "${selected_days[@]}"; do
-    if [[ -n "$SCHEDULE_DAYS" ]]; then
-      SCHEDULE_DAYS+=","
-    fi
+    [[ -n "$SCHEDULE_DAYS" ]] && SCHEDULE_DAYS+=","
     SCHEDULE_DAYS+="$day"
   done
 
   echo ""
-  read -rp "Shutdown time (HH:MM, 24h format, e.g. 23:00): " SCHEDULE_TIME
-  if [[ ! "$SCHEDULE_TIME" =~ ^[0-9]{2}:[0-9]{2}$ ]]; then
-    err "Invalid time format."
+  info "Select shutdown time (24h format):"
+  echo ""
+  echo "  Reference:"
+  echo "    00:00 = 12:00 AM  (midnight)"
+  echo "    01:00 =  1:00 AM"
+  echo "    02:00 =  2:00 AM"
+  echo "    03:00 =  3:00 AM"
+  echo "    04:00 =  4:00 AM"
+  echo "    05:00 =  5:00 AM"
+  echo "    06:00 =  6:00 AM"
+  echo "    07:00 =  7:00 AM"
+  echo "    08:00 =  8:00 AM"
+  echo "    09:00 =  9:00 AM"
+  echo "    10:00 = 10:00 AM"
+  echo "    11:00 = 11:00 AM"
+  echo "    12:00 = 12:00 PM  (noon)"
+  echo "    13:00 =  1:00 PM"
+  echo "    14:00 =  2:00 PM"
+  echo "    15:00 =  3:00 PM"
+  echo "    16:00 =  4:00 PM"
+  echo "    17:00 =  5:00 PM"
+  echo "    18:00 =  6:00 PM"
+  echo "    19:00 =  7:00 PM"
+  echo "    20:00 =  8:00 PM"
+  echo "    21:00 =  9:00 PM"
+  echo "    22:00 = 10:00 PM"
+  echo "    23:00 = 11:00 PM"
+  echo ""
+  read -rp "  Time (HH:MM, e.g. 23:00 for 11:00 PM): " SCHEDULE_TIME
+
+  if [[ ! "$SCHEDULE_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+    err "Invalid time. Use HH:MM in 24h format (00:00 - 23:59)."
     return 1
   fi
 
   save_config
   update_timer_time "$SCHEDULE_TIME"
   enable_timer
-  log "Schedule set: ${SCHEDULE_DAYS} at ${SCHEDULE_TIME}"
+  local day_names_map
+  day_names_map=([mon]="Monday" [tue]="Tuesday" [wed]="Wednesday" [thu]="Thursday" [fri]="Friday" [sat]="Saturday" [sun]="Sunday")
+  local display_days=""
+  IFS=',' read -ra days <<< "$SCHEDULE_DAYS"
+  for d in "${days[@]}"; do
+    [[ -n "$display_days" ]] && display_days+=", "
+    display_days+="${day_names_map[$d]:-$d}"
+  done
+  local t12
+  t12=$(format_12h "${SCHEDULE_TIME}")
+  log "Schedule set: ${display_days} at ${SCHEDULE_TIME} (${t12})"
 }
 
 remove_schedule() {
