@@ -8,11 +8,9 @@ SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 TIMER_FILE="/etc/systemd/system/${SERVICE_NAME}.timer"
 SHUTDOWN_SCRIPT="/usr/local/bin/${SERVICE_NAME}-shutdown.sh"
 
-GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; RED='\033[0;31m'; BOLD='\033[1m'; NC='\033[0m'
-log()  { echo -e "${GREEN}[+]${NC} $1"; }
-warn() { echo -e "${YELLOW}[!]${NC} $1"; }
-info() { echo -e "${CYAN}[*]${NC} $1"; }
-err()  { echo -e "${RED}[-]${NC} $1"; }
+log()  { echo "[+] $1"; }
+info() { echo "[*] $1"; }
+err()  { echo "[-] $1" >&2; }
 
 DAYS_OF_WEEK=(mon tue wed thu fri sat sun)
 
@@ -123,9 +121,8 @@ format_12h() {
 }
 
 show_schedule() {
-  echo ""
   if [[ ! -f "$CONFIG_FILE" ]]; then
-    info "No schedule configured."
+    whiptail --msgbox --title "Schedule" "No schedule configured." 7 40
     return
   fi
 
@@ -142,12 +139,6 @@ show_schedule() {
   local today
   today=$(date +%a | tr '[:upper:]' '[:lower:]')
 
-  echo ""
-  info "Schedule summary:"
-  echo "  Days:       ${display_days}"
-  echo "  Time:       ${SCHEDULE_TIME}  (${t12})"
-  echo "  Today:      ${day_names_map[$today]:-$today}"
-
   local today_match="no"
   for d in "${days[@]}"; do
     if [[ "$d" == "$today" ]]; then
@@ -155,35 +146,31 @@ show_schedule() {
       break
     fi
   done
-  echo "  Scheduled:  ${today_match}"
-  echo ""
 
-  if [[ -f "$SHUTDOWN_SCRIPT" ]]; then
-    echo "  Shutdown script: ${GREEN}present${NC} ($SHUTDOWN_SCRIPT)"
-  else
-    echo "  Shutdown script: ${RED}missing${NC}"
-  fi
-  if [[ -f "$SERVICE_FILE" ]]; then
-    echo "  Service unit:    ${GREEN}present${NC}"
-  else
-    echo "  Service unit:    ${RED}missing${NC}"
-  fi
+  local script_status="present"
+  [[ ! -f "$SHUTDOWN_SCRIPT" ]] && script_status="missing"
+  local unit_status="present"
+  [[ ! -f "$SERVICE_FILE" ]] && unit_status="missing"
 
-  echo ""
+  local timer_status next_run
   if systemctl is-active --quiet "${SERVICE_NAME}.timer" 2>/dev/null; then
-    echo "  Timer: ${GREEN}active${NC}"
-    local trigger
-    trigger=$(systemctl status "${SERVICE_NAME}.timer" 2>/dev/null | grep 'Trigger:' | head -1 | sed 's/.*Trigger: //')
-    if [[ -n "$trigger" ]]; then
-      echo "  Next run: ${trigger}"
-    else
-      echo "  Next run: ${YELLOW}awaiting trigger calculation${NC}"
-    fi
+    timer_status="active"
+    next_run=$(systemctl status "${SERVICE_NAME}.timer" 2>/dev/null | grep 'Trigger:' | head -1 | sed 's/.*Trigger: //')
+    [[ -z "$next_run" ]] && next_run="awaiting calculation"
   else
-    echo "  Timer: ${RED}inactive${NC}"
-    echo "  Next run: ${YELLOW}not scheduled${NC}"
+    timer_status="inactive"
+    next_run="not scheduled"
   fi
-  echo ""
+
+  whiptail --msgbox --title "Schedule Summary" \
+    "Days:       ${display_days}\n\
+Time:       ${SCHEDULE_TIME}  (${t12})\n\
+Today:      ${day_names_map[$today]:-$today}\n\
+Scheduled:  ${today_match}\n\n\
+Shutdown script: ${script_status}\n\
+Service unit:    ${unit_status}\n\n\
+Timer: ${timer_status}\n\
+Next run: ${next_run}" 16 55
 }
 
 configure_schedule() {
@@ -263,16 +250,6 @@ remove_schedule() {
   rm -f "$TIMER_FILE"
   systemctl daemon-reload
   log "Schedule removed and systemd units cleaned up."
-}
-
-show_banner() {
-  clear
-  echo -e "${CYAN}"
-  echo '  ╔══════════════════════════════════════╗'
-  echo '  ║        Deb SleepWithMe               ║'
-  echo '  ║   Scheduled Server Shutdown Tool     ║'
-  echo '  ╚══════════════════════════════════════╝'
-  echo -e "${NC}"
 }
 
 main() {
