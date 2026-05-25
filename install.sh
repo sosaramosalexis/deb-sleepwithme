@@ -150,104 +150,72 @@ show_schedule() {
 }
 
 configure_schedule() {
-  echo ""
+  if ! command -v whiptail &>/dev/null; then
+    apt-get install -y whiptail 2>/dev/null || {
+      err "whiptail is required. Install: apt-get install whiptail"
+      return 1
+    }
+  fi
 
-  local day_names=("Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday" "Sunday")
-  local toggle idx mark i inp day
+  local days_arr=() day selected display_days t12
 
-  toggle=("" "" "" "" "" "" "")
+  selected=$(whiptail --checklist --title "Deb SleepWithMe" \
+    "Select shutdown days (\xE2\x86\x91\xE2\x86\x93 arrows to move, SPACE to toggle, ENTER to confirm):" \
+    16 55 7 \
+    "mon" "Monday"    OFF \
+    "tue" "Tuesday"   OFF \
+    "wed" "Wednesday" OFF \
+    "thu" "Thursday"  OFF \
+    "fri" "Friday"    OFF \
+    "sat" "Saturday"  OFF \
+    "sun" "Sunday"    OFF \
+    3>&1 1>&2 2>&3) || return 1
 
-  info "Select shutdown days (type a number to toggle it, then 'd' when done):"
-  echo ""
-  while true; do
-    for i in "${!DAYS_OF_WEEK[@]}"; do
-      mark=" "
-      [[ -n "${toggle[$i]}" ]] && mark="X"
-      printf "  [%s] %d) %-9s (%s)\n" "$mark" $((i+1)) "${DAYS_OF_WEEK[$i]}" "${day_names[$i]}"
-    done
-    echo ""
-    read -r -p "  Toggle day number (or 'd' when done): " inp
-    if [[ "$inp" == [Dd] ]]; then
-      break
-    elif [[ "$inp" =~ ^[1-7]$ ]]; then
-      idx=$((inp-1))
-      if [[ -n "${toggle[$idx]}" ]]; then
-        toggle[$idx]=""
-      else
-        toggle[$idx]="X"
-      fi
-      echo ""
-    else
-      err "Enter 1-7 to toggle, or 'd' to finish."
-      echo ""
-    fi
-  done
-
-  for i in "${!toggle[@]}"; do
-    [[ -n "${toggle[$i]}" ]] && selected_days+=("${DAYS_OF_WEEK[$i]}")
-  done
-
-  if [[ ${#selected_days[@]} -eq 0 ]]; then
+  eval "days_arr=($selected)" 2>/dev/null
+  if [[ ${#days_arr[@]} -eq 0 ]]; then
     err "No days selected."
     return 1
   fi
 
   SCHEDULE_DAYS=""
-  for day in "${selected_days[@]}"; do
+  for day in "${days_arr[@]}"; do
     [[ -n "$SCHEDULE_DAYS" ]] && SCHEDULE_DAYS+=","
     SCHEDULE_DAYS+="$day"
   done
 
-  echo ""
-  info "Select shutdown time (24h format):"
-  echo ""
-  echo "  Reference:"
-  echo "    00:00 = 12:00 AM  (midnight)"
-  echo "    01:00 =  1:00 AM"
-  echo "    02:00 =  2:00 AM"
-  echo "    03:00 =  3:00 AM"
-  echo "    04:00 =  4:00 AM"
-  echo "    05:00 =  5:00 AM"
-  echo "    06:00 =  6:00 AM"
-  echo "    07:00 =  7:00 AM"
-  echo "    08:00 =  8:00 AM"
-  echo "    09:00 =  9:00 AM"
-  echo "    10:00 = 10:00 AM"
-  echo "    11:00 = 11:00 AM"
-  echo "    12:00 = 12:00 PM  (noon)"
-  echo "    13:00 =  1:00 PM"
-  echo "    14:00 =  2:00 PM"
-  echo "    15:00 =  3:00 PM"
-  echo "    16:00 =  4:00 PM"
-  echo "    17:00 =  5:00 PM"
-  echo "    18:00 =  6:00 PM"
-  echo "    19:00 =  7:00 PM"
-  echo "    20:00 =  8:00 PM"
-  echo "    21:00 =  9:00 PM"
-  echo "    22:00 = 10:00 PM"
-  echo "    23:00 = 11:00 PM"
-  echo ""
-  read -rp "  Time (HH:MM, e.g. 23:00 for 11:00 PM): " SCHEDULE_TIME
+  SCHEDULE_TIME=$(whiptail --inputbox --title "Deb SleepWithMe" \
+    "Enter shutdown time (24h HH:MM)\n\n\
+00-05 AM  midnight-5am    12-17 PM  noon-5pm\n\
+06-11 AM  6am-11am        18-23 PM  6pm-11pm\n\n\
+Example: 23:00 = 11:00 PM" \
+    13 55 "23:00" 3>&1 1>&2 2>&3) || return 1
 
   if [[ ! "$SCHEDULE_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
-    err "Invalid time. Use HH:MM in 24h format (00:00 - 23:59)."
+    whiptail --msgbox --title "Invalid Time" \
+      "Use HH:MM in 24h format.\nHours: 00-23, Minutes: 00-59" 8 40
     return 1
   fi
 
-  save_config
-  update_timer_time "$SCHEDULE_TIME"
-  enable_timer
   local day_names_map
   day_names_map=([mon]="Monday" [tue]="Tuesday" [wed]="Wednesday" [thu]="Thursday" [fri]="Friday" [sat]="Saturday" [sun]="Sunday")
-  local display_days=""
+  display_days=""
   IFS=',' read -ra days <<< "$SCHEDULE_DAYS"
   for d in "${days[@]}"; do
     [[ -n "$display_days" ]] && display_days+=", "
     display_days+="${day_names_map[$d]:-$d}"
   done
-  local t12
   t12=$(format_12h "${SCHEDULE_TIME}")
-  log "Schedule set: ${display_days} at ${SCHEDULE_TIME} (${t12})"
+
+  if whiptail --yesno --title "Confirm Schedule" \
+    "Shutdown on: ${display_days}\nAt: ${SCHEDULE_TIME} (${t12})\n\nApply this schedule?" 10 55; then
+    save_config
+    update_timer_time "$SCHEDULE_TIME"
+    enable_timer
+    log "Schedule set: ${display_days} at ${SCHEDULE_TIME} (${t12})"
+  else
+    info "Schedule cancelled."
+    return 1
+  fi
 }
 
 remove_schedule() {
