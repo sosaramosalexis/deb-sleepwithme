@@ -129,7 +129,7 @@ show_schedule() {
     return
   fi
 
-  local day_names_map
+  local -A day_names_map
   day_names_map=([mon]="Monday" [tue]="Tuesday" [wed]="Wednesday" [thu]="Thursday" [fri]="Friday" [sat]="Saturday" [sun]="Sunday")
   local display_days=""
   IFS=',' read -ra days <<< "$SCHEDULE_DAYS"
@@ -233,7 +233,7 @@ Example: 23:00 = 11:00 PM" \
     return 1
   fi
 
-  local day_names_map
+  local -A day_names_map
   day_names_map=([mon]="Monday" [tue]="Tuesday" [wed]="Wednesday" [thu]="Thursday" [fri]="Friday" [sat]="Saturday" [sun]="Sunday")
   display_days=""
   IFS=',' read -ra days <<< "$SCHEDULE_DAYS"
