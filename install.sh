@@ -49,7 +49,7 @@ source "$CONFIG_FILE"
 if [[ -z "${SCHEDULE_DAYS:-}" || -z "${SCHEDULE_TIME:-}" ]]; then
   exit 0
 fi
-TODAY=$(date +%a | tr '[:upper:]' '[:lower:]')
+TODAY=$(LC_ALL=C date +%a | tr '[:upper:]' '[:lower:]')
 IFS=',' read -ra DAYS <<< "$SCHEDULE_DAYS"
 for day in "${DAYS[@]}"; do
   if [[ "$(echo "$day" | xargs)" == "$TODAY" ]]; then
@@ -137,7 +137,7 @@ show_schedule() {
   local t12
   t12=$(format_12h "${SCHEDULE_TIME}")
   local today
-  today=$(date +%a | tr '[:upper:]' '[:lower:]')
+  today=$(LC_ALL=C date +%a | tr '[:upper:]' '[:lower:]')
 
   local today_match="no"
   for d in "${days[@]}"; do
@@ -180,6 +180,8 @@ configure_schedule() {
       return 1
     }
   fi
+
+  install_systemd_units
 
   local days_arr=() day selected display_days t12
 
