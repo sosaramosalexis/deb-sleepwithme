@@ -10,7 +10,7 @@ Schedule automatic server shutdowns by day of week and time.
 
 ```bash
 su -
-bash <(curl -fsSL https://raw.githubusercontent.com/sosramalex/deb-sleepwithme/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/sosaramosalexis/deb-sleepwithme/main/install.sh)
 ```
 
 ## What it does
